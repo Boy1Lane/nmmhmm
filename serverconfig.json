@@ -1,0 +1,6 @@
+{
+  "server_port": 8080,
+  "storage_dir": "../data/storage/",
+  "db_user_path": "../data/users.json",
+  "db_meta_path": "../data/metadata.json"
+}
