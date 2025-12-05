@@ -5,9 +5,11 @@
 #include <fstream>
 #include <sstream>
 #include <filesystem>
+#include "../common/json.hpp"
 
 using namespace std;
 namespace fs = std::filesystem;
+using json = nlohmann::json;
 
 #define BUFFER_SIZE 1024 * 1024 // 1MB Buffer cho socket
 
@@ -108,19 +110,19 @@ void ClientCore::writeFile(const string& path, const vector<unsigned char>& data
 
 void ClientCore::actionRegister() {
     cout << "\n--- DANG KY ---\n";
-    while (true) { // Vòng lặp cho phép nhập lại nếu trùng
+    while (true) {
         string u, p;
         cout << "Nhap Username (hoac 'exit' de thoat): "; cin >> u;
         if (u == "exit") return;
 
         cout << "Nhap Password: "; cin >> p;
 
-        // Sinh khoa bao mat
+        // Sinh khóa bảo mật
         string myPub, myPriv;
         CryptoUtils::GenerateDHKeys(myPriv, myPub);
         cout << "[INFO] Sinh khoa thanh cong.\n";
 
-        // Sinh Salt & Hash (Logic mới)
+        // Sinh Salt & Hash
         string salt = CryptoUtils::GenerateSalt();
         string passHash = CryptoUtils::HashPassword(p, salt);
         string pubHex = CryptoUtils::BytesToHex(vector<unsigned char>(myPub.begin(), myPub.end()));
@@ -155,14 +157,13 @@ void ClientCore::actionRegister() {
     }
 }
 
-// 2. SỬA LẠI HÀM ĐĂNG NHẬP (Quy trình 2 bước)
 void ClientCore::actionLogin() {
     cout << "\n--- DANG NHAP ---\n";
     string u, p;
     cout << "Username: "; cin >> u;
     cout << "Password: "; cin >> p;
 
-    // B1: Load Private Key (Giữ nguyên)
+    // Load Private Key
     try {
         string keyPath = CLIENT_KEY_ROOT + u + "/" + u + ".priv";
 
@@ -174,9 +175,7 @@ void ClientCore::actionLogin() {
         return;
     }
 
-    // --- BẮT ĐẦU SỬA TỪ ĐÂY ---
-
-    // B2: Xin Salt từ Server (Login Step 1)
+    // Xin Salt từ Server 
     cout << "[INFO] Dang lay Salt tu Server...\n";
     string cmdSalt = "GETSALT|" + u;
     ServerResponse resSalt = sendRequest(cmdSalt);
@@ -186,12 +185,12 @@ void ClientCore::actionLogin() {
         return;
     }
 
-    string serverSalt = resSalt.payloadData; // Đây là salt đúng của user này
+    string serverSalt = resSalt.payloadData;
 
-    // B3: Hash Password với Salt vừa nhận được
+    // Hash Password với Salt vừa nhận được
     string passHash = CryptoUtils::HashPassword(p, serverSalt);
 
-    // B4: Gửi Hash lên Server (Login Step 2)
+    // Gửi Hash lên Server
     string cmdLogin = "LOGIN|" + u + "|" + passHash;
     ServerResponse res = sendRequest(cmdLogin);
     cout << "Server: " << res.message << endl;
@@ -226,7 +225,6 @@ void ClientCore::actionUpload() {
 
         // B4: Key Wrapping (Chủ sở hữu tự khóa Key bằng PassHash của mình)
         // Dùng PassHash làm Key để mã hóa FileKey
-        // Cần convert PassHashHex sang bytes
         vector<unsigned char> kekOwner = CryptoUtils::HexToBytes(currentPassHashHex);
         vector<unsigned char> ivZero(16, 0); // IV cho KeyWrap có thể null
         vector<unsigned char> encryptedFileKey = CryptoUtils::EncryptAES(fileKey, kekOwner, ivZero);
@@ -239,11 +237,11 @@ void ClientCore::actionUpload() {
         string hexContent = CryptoUtils::BytesToHex(cipherData);
         string hexKey = CryptoUtils::BytesToHex(encryptedFileKey);
 
-        // Lưu ý: Gửi IV kèm content (Format: IV + Cipher)
+        // Gửi IV kèm content (Format: IV + Cipher)
         string hexIV = CryptoUtils::BytesToHex(fileIV);
         string finalPayload = hexIV + hexContent; // Ghép IV vào đầu để Server lưu chung
 
-        // Cẩn thận buffer size socket (Gửi file to sẽ lỗi ở CLI demo này)
+        // Chỉ hỗ trợ file ít hơn 500KB
         if (finalPayload.size() > 500000) {
             cout << "[WARNING] File qua lon!\n";
         }
@@ -356,96 +354,223 @@ void ClientCore::actionShare() {
     }
 }
 
+// Yêu cầu hủy share
+void ClientCore::actionRevokeShare() {
+    if (!isLoggedIn()) {
+        cout << "Vui long dang nhap truoc!" << endl;
+        return;
+    }
+
+    string fname, target;
+    cout << "\n--- HUY CHIA SE (REVOKE ACCESS) ---\n";
+    cout << "Ten file: "; cin >> fname;
+    cout << "Nguoi bi huy quyen (Username): "; cin >> target;
+
+    // Gửi lệnh UNSHARE
+    string cmd = "UNSHARE|" + sessionToken + "|" + fname + "|" + target;
+    ServerResponse res = sendRequest(cmd);
+
+    if (res.status == AppError::SUCCESS) {
+        cout << "[SUCCESS] " + res.message << endl;
+        return;
+    }
+    else {
+        cout << "[FAIL] " + res.message << endl;;
+    }
+}
+
+// Tải file
 void ClientCore::actionDownload() {
     if (!isLoggedIn()) { cout << "Vui long login!\n"; return; }
 
     string fname;
-    cout << "\n--- DOWNLOAD ---\nTen file: "; cin >> fname;
+    cout << "\n--- DOWNLOAD (MY FILES) ---\n";
+    cout << "Ten file (chi tai duoc file ban so huu): "; cin >> fname;
 
-    // B1: Gửi Request
+    // 1. Gửi Request
     string cmd = "DOWNLOAD|" + sessionToken + "|" + fname;
     ServerResponse res = sendRequest(cmd);
 
     if (res.status != AppError::SUCCESS) {
-        cout << "Loi: " << res.message << endl;
+        cout << "Loi tu Server: " << res.message << endl;
         return;
     }
 
-    // Payload format: EncryptedKeyHex|EncryptedDataHex (Data có IV ở đầu)
+    // 2. Parse Payload
+    // Payload format: EncryptedKeyHex|EncryptedDataHex
     vector<string> parts = split(res.payloadData, '|');
     if (parts.size() < 2) {
-        cout << "[ERROR] Loi Protocol: Payload thieu du lieu (chi nhan duoc 1 phan)." << endl;
+        cout << "[ERROR] Loi Protocol: Payload thieu du lieu.\n";
         return;
     }
 
     vector<unsigned char> encryptedKey = CryptoUtils::HexToBytes(parts[0]);
     vector<unsigned char> encryptedContent = CryptoUtils::HexToBytes(parts[1]);
 
-    // Tách IV ra khỏi Content (16 byte đầu là IV)
+    // Tách IV
     if (encryptedContent.size() < 16) { cout << "File loi/rong.\n"; return; }
     vector<unsigned char> fileIV(encryptedContent.begin(), encryptedContent.begin() + 16);
     vector<unsigned char> cipherBody(encryptedContent.begin() + 16, encryptedContent.end());
 
-    // B2: Giải mã Key
+    // 3. Giải mã Key
     vector<unsigned char> fileKey;
     vector<unsigned char> ivZero(16, 0);
 
-    // Thử cách 1: Dùng PassHash (Nếu là chính chủ)
     try {
+        // Lấy hash mật khẩu hiện tại làm Key để mở khóa FileKey
         vector<unsigned char> kekOwner = CryptoUtils::HexToBytes(currentPassHashHex);
+
+        // Nếu decrypt thất bại (do sai key)
         fileKey = CryptoUtils::DecryptAES(encryptedKey, kekOwner, ivZero);
-        cout << "[INFO] Da giai ma Key bang PassHash.\n";
+
+        cout << "[INFO] Xac thuc chu so huu thanh cong. Dang giai ma...\n";
     }
     catch (...) {
-        // Thất bại -> Có thể là file được Share -> Thử cách 2: Dùng Shared Secret
-        string senderName;
-        cout << "[INFO] Nhap ten nguoi share: ";
-        cin >> senderName;
-
-        // Lấy PubKey của Sender
-        string cmdKey = "GETKEY|" + sessionToken + "|" + senderName;
-        ServerResponse resKey = sendRequest(cmdKey);
-        if (resKey.status == AppError::SUCCESS) {
-            string senderPubPEM = string((const char*)CryptoUtils::HexToBytes(resKey.payloadData).data());
-
-            // Tính lại Secret
-            auto secret = CryptoUtils::ComputeSharedSecret(myPrivateKey, senderPubPEM);
-            string secretHex = CryptoUtils::BytesToHex(secret);
-            string kekHex = CryptoUtils::HashPassword(secretHex, "common_salt");
-            vector<unsigned char> kekShare = CryptoUtils::HexToBytes(kekHex);
-
-            try {
-                fileKey = CryptoUtils::DecryptAES(encryptedKey, kekShare, ivZero);
-                cout << "[INFO] Da giai ma Key bang Shared Secret thanh cong!\n";
-            }
-            catch (...) {
-                cout << "[ERROR] Giai ma Key that bai. Ban khong co quyen hoac sai Sender.\n";
-                return;
-            }
-        }
-        else {
-            cout << "[ERROR] Khong tim thay User: " << senderName << endl;
-            return;
-        }
+        // Nếu lỗi ở đây, nghĩa là Key này không được mã hóa bằng mật khẩu của người dùng hiện tại
+        cout << "[ERROR] Giai ma that bai! Day khong phai file cua ban hoac file duoc share.\n";
+        cout << "HINT: Neu day la file duoc share, vui long dung chuc nang 'Download via Link'!\n";
+        return;
     }
 
-    // B3: Có FileKey rồi -> Giải mã File
+    // Có FileKey rồi -> Giải mã File và Lưu
     try {
         vector<unsigned char> plainData = CryptoUtils::DecryptAES(cipherBody, fileKey, fileIV);
 
-        // --- SỬA ĐOẠN NÀY ---
         string saveDir = CLIENT_STORAGE_ROOT + this->currentUsername + "/";
         if (!fs::exists(saveDir)) {
             fs::create_directories(saveDir);
         }
-
         string savePath = saveDir + fname;
 
         writeFile(savePath, plainData);
         cout << "[SUCCESS] File da tai xuong tai: " << savePath << endl;
     }
     catch (exception& e) {
-        cout << "[ERROR] Loi giai ma AES: " << e.what() << endl;
+        cout << "[ERROR] Loi giai ma noi dung file: " << e.what() << endl;
+    }
+}
+
+string parseUrlToken(string url) {
+    string prefix = "securenote://download/";
+    if (url.find(prefix) != 0) return ""; // Không đúng format
+    return url.substr(prefix.length());
+}
+
+void ClientCore::actionDownloadViaLink() {
+    if (!isLoggedIn()) {
+        cout << "Vui long dang nhap truoc!";
+        return;
+    }
+
+    string url;
+    cout << "\n--- DOWNLOAD VIA LINK ---\n";
+    cout << "Nhap Link (securenote://download/...): ";
+    cin >> url;
+
+    string urlToken = parseUrlToken(url);
+    if (urlToken.empty()) {
+        cout << "[ERROR] Link khong dung dinh dang!" << endl;
+        return;
+    }
+
+    // Gửi lệnh
+    string cmd = "DOWNLOAD_LINK|" + sessionToken + "|" + urlToken;
+    ServerResponse res = sendRequest(cmd);
+
+    if (res.status != AppError::SUCCESS) {
+        cout << "[ERROR] " + res.message;
+        return;
+    }
+
+    // Parse Payload: FILENAME|KEY|DATA
+    vector<string> parts = split(res.payloadData, '|');
+
+
+    size_t firstSep = res.payloadData.find('|');
+    if (firstSep == string::npos) {
+        cout << "[ERROR] Payload loi (thieu key)" << endl;
+        return;
+    }
+
+    string fname = res.payloadData.substr(0, firstSep);
+
+    size_t secondSep = res.payloadData.find('|', firstSep + 1);
+    if (secondSep == string::npos) {
+        cout << "[ERROR] Payload loi (thieu data)" << endl;
+        return;
+    }
+
+    string encryptedKeyHex = res.payloadData.substr(firstSep + 1, secondSep - firstSep - 1);
+    string encryptedDataHex = res.payloadData.substr(secondSep + 1);
+
+    // --- ĐOẠN DƯỚI ĐÂY GIỐNG HỆT actionDownload CŨ ---
+    vector<unsigned char> encryptedKey = CryptoUtils::HexToBytes(encryptedKeyHex);
+    vector<unsigned char> encryptedContent = CryptoUtils::HexToBytes(encryptedDataHex);
+
+    if (encryptedContent.size() < 16) {
+        cout << "[ERROR] Data hong." << endl;
+        return;
+    }
+    vector<unsigned char> fileIV(encryptedContent.begin(), encryptedContent.begin() + 16);
+    vector<unsigned char> cipherBody(encryptedContent.begin() + 16, encryptedContent.end());
+
+    // Giải mã Key (Chắc chắn là Shared Secret vì đây là Link Share)
+    // Nhưng ta không biết ai gửi? 
+    // -> À, vấn đề nảy sinh: Để tính Shared Secret, Bob cần biết Alice là ai để lấy Public Key.
+    // -> ServerCore nên trả về thêm "SenderUsername" trong payload nữa, hoặc Client phải tự hỏi.
+
+    // ĐỂ ĐƠN GIẢN: Ta sẽ thử giải mã bằng PassHash (nếu tự share cho mình).
+    // Nếu không được, ta sẽ yêu cầu User nhập tên người gửi.
+
+    vector<unsigned char> fileKey;
+    vector<unsigned char> ivZero(16, 0);
+
+    // Thử Key Wrapping (PassHash)
+    try {
+        vector<unsigned char> kekOwner = CryptoUtils::HexToBytes(currentPassHashHex);
+        fileKey = CryptoUtils::DecryptAES(encryptedKey, kekOwner, ivZero);
+    }
+    catch (...) {
+        // Nếu không phải chính chủ, hỏi user ai gửi link này
+        cout << "[INFO] Link nay do nguoi khac gui. Hay nhap Username nguoi gui (de lay Public Key): ";
+        string senderName;
+        cin >> senderName;
+
+        // (Đoạn lấy PubKey và tính Secret giống hệt actionDownload cũ)
+        string cmdKey = "GETKEY|" + sessionToken + "|" + senderName;
+        ServerResponse resKey = sendRequest(cmdKey);
+        if (resKey.status != AppError::SUCCESS) {
+            cout << "[ERROR] Khong tim thay user " + senderName << endl;
+            return;
+        }
+
+        string senderPubPEM = string((const char*)CryptoUtils::HexToBytes(resKey.payloadData).data());
+        auto secret = CryptoUtils::ComputeSharedSecret(myPrivateKey, senderPubPEM);
+        string secretHex = CryptoUtils::BytesToHex(secret);
+        string kekHex = CryptoUtils::HashPassword(secretHex, "common_salt");
+        vector<unsigned char> kekShare = CryptoUtils::HexToBytes(kekHex);
+
+        try {
+            fileKey = CryptoUtils::DecryptAES(encryptedKey, kekShare, ivZero);
+        }
+        catch (...) {
+            cout << "[ERROR] Giai ma Key that bai. Sai nguoi gui hoac Link hong." << endl;
+        }
+    }
+
+    // Giải mã file
+    try {
+        vector<unsigned char> plainData = CryptoUtils::DecryptAES(cipherBody, fileKey, fileIV);
+        string saveDir = CLIENT_STORAGE_ROOT + this->currentUsername + "/";
+        if (!fs::exists(saveDir)) {
+            fs::create_directories(saveDir);
+        }
+        string savePath = CLIENT_STORAGE_ROOT + this->currentUsername + "/" + fname;
+        writeFile(savePath, plainData);
+        cout << "[SUCCESS] File da tai xuong tai: " << savePath << endl;
+    }
+    catch (exception& e) {
+        cout << "[ERROR] Decrypt AES: " << e.what();
     }
 }
 
@@ -455,17 +580,88 @@ void ClientCore::actionLogout() {
         return;
     }
 
-    // 1. Gửi lệnh báo Server hủy Token (Optional nhưng nên làm)
+    // Gửi lệnh báo Server hủy Token
     // Giao thức: LOGOUT|token
     string cmd = "LOGOUT|" + sessionToken;
     sendRequest(cmd);
-    // Không cần quan tâm Server trả lời gì, Client cứ xóa local là được
 
-    // 2. Xóa sạch dữ liệu phiên làm việc cục bộ
+    // Xóa sạch dữ liệu phiên làm việc cục bộ
     sessionToken = "";
     currentUsername = "";
     currentPassHashHex = "";
     myPrivateKey = "";
 
     cout << "[SUCCESS] Da dang xuat thanh cong.\n";
+}
+
+void ClientCore::actionListFiles() {
+    if (!isLoggedIn()) {
+        cout << "Vui long dang nhap truoc!";
+        return;
+    }
+
+    // Gửi lệnh
+    string cmd = "LIST|" + sessionToken;
+    ServerResponse res = sendRequest(cmd);
+
+    if (res.status != AppError::SUCCESS) {
+        cout << "[ERROR] " + res.message;
+        return;
+    }
+
+    // Parse JSON payload
+    try {
+        json jFiles = json::parse(res.payloadData);
+
+        cout << "\n--- DANH SACH FILE CUA BAN ---\n";
+        if (jFiles.empty()) {
+            cout << "(Trong)\n";
+        }
+        else {
+            int i = 1;
+            for (const auto& file : jFiles) {
+                cout << i++ << ". " << file.get<string>() << endl;
+            }
+        }
+        cout << "------------------------------\n";
+
+        cout << "[SUCCESS] Da lay danh sach file." << endl;
+        return;
+    }
+    catch (...) {
+        cout << "[ERROR] Loi parse du lieu tu Server." << endl;
+    }
+}
+
+void ClientCore::actionDeleteFile() {
+    if (!isLoggedIn()) {
+        cout << "Vui long dang nhap truoc!";
+        return;
+    }
+
+    string fname;
+    cout << "\n--- XOA FILE ---\n";
+    cout << "Nhap ten file muon xoa: "; cin >> fname;
+
+    // Bước xác nhận (UX)
+    char confirm;
+    cout << "Ban co chac chan muon xoa vinh vien file '" << fname << "' tren Server? (y/n): ";
+    cin >> confirm;
+
+    if (confirm != 'y' && confirm != 'Y') {
+        cout << "Da huy thao tac xoa." << endl;
+        return;
+    }
+
+    // Gửi lệnh
+    string cmd = "DELETE|" + sessionToken + "|" + fname;
+    ServerResponse res = sendRequest(cmd);
+
+    if (res.status == AppError::SUCCESS) {
+        cout << "[SUCCESS] " + res.message << endl;
+        return;
+    }
+    else {
+        cout << "[FAIL] " + res.message << endl;
+    }
 }

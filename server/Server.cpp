@@ -118,8 +118,16 @@ void ClientHandler(SOCKET clientSocket) {
                     int mins = stoi(args[4]);
                     res = g_ServerApp->reqShare(args[1], args[2], args[3], mins, args[5]);
                 }
+                else if (cmd == "UNSHARE" && args.size() == 4) {
+                    // UNSHARE|token|filename|targetUser
+                    res = g_ServerApp->reqRevokeShare(args[1], args[2], args[3]);
+                }
                 else if (cmd == "DOWNLOAD" && args.size() == 3) {
                     res = g_ServerApp->reqDownload(args[1], args[2]);
+                }
+                else if (cmd == "DOWNLOAD_LINK" && args.size() == 3) {
+                    // DOWNLOAD_LINK|sessionToken|urlToken
+                    res = g_ServerApp->reqDownloadViaLink(args[1], args[2]);
                 }
                 else if (cmd == "GETSALT" && args.size() == 2) {
                     // GETSALT|username
@@ -128,6 +136,14 @@ void ClientHandler(SOCKET clientSocket) {
                 else if (cmd == "LOGOUT" && args.size() == 2) {
                     // LOGOUT|token
                     res = g_ServerApp->reqLogout(args[1]);
+                }
+                else if (cmd == "LIST" && args.size() == 2) {
+                    // LIST|token
+                    res = g_ServerApp->reqListFiles(args[1]);
+                }
+                else if (cmd == "DELETE" && args.size() == 3) {
+                    // DELETE|token|filename
+                    res = g_ServerApp->reqDeleteFile(args[1], args[2]);
                 }
                 else {
                     res.message = "Invalid Command Format or Wrong Argument Count";

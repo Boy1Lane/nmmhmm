@@ -13,7 +13,6 @@ private:
     string metaPath;
 
     // Map: FileID (hoặc Filename) -> Metadata đầy đủ (bao gồm owner, shares, keys)
-    // Dùng FileMetadata từ ServerStruct.h thay vì vector<ShareInfo> sơ sài cũ
     map<string, FileMetadata> fileDB;
 
     void loadMetadata();
@@ -22,12 +21,21 @@ private:
 public:
     FileManager(const string& storageFolder, const string& metaJsonPath);
 
-    // 1. Save File: Cần nhận thêm encryptedKey của Owner (để chủ nhân tự mở file mình)
+    // Save File: Cần nhận thêm encryptedKey của Owner (để chủ nhân tự mở file mình)
     void saveFile(const string& filename, const vector<unsigned char>& data, const string& owner, const string& ownerEncryptedKey);
 
-    // 2. Share File: Cần nhận thêm encryptedKey cho người được share
-    bool shareFile(const string& filename, const string& sender, const string& targetUser, int durationSeconds, const string& encryptedKeyForTarget);
+    // Share File
+    string shareFile(const string& filename, const string& sender, const string& targetUser, int durationSeconds, const string& encryptedKeyForTarget);
+    // Hủy share
+    bool revokeShare(const string& filename, const string& owner, const string& targetUser);
 
-    // 3. Get File: Trả về nội dung + Key đã mã hóa cho người request
+    // Get File: Trả về nội dung + Key đã mã hóa cho người request
     vector<unsigned char> getFile(const string& filename, const string& requester, AppError& outError, string& outEncryptedKey);
+    vector<unsigned char> getFileByLink(const string& token, const string& requester, AppError& outError, string& outEncryptedKey, string& outFilename);
+
+    // Trả về danh sách các File đã tải lên
+    vector<string> listFiles(const string& username);
+
+    // Xóa file
+    bool deleteFile(const string& filename, const string& requester);
 };

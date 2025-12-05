@@ -16,38 +16,47 @@ public:
         const std::string& userPath,
         const std::string& metaPath);
 
-    // --- CÁC HÀM XỬ LÝ REQUEST TỪ CLIENT ---
-
-    // 1. Đăng ký
+    // Đăng ký
     ServerResponse reqRegister(const std::string& username,
         const std::string& passHashHex,
         const std::string& saltHex,
         const std::string& pubKeyHex);
 
-    // 2. Đăng nhập
+    // Đăng nhập
     ServerResponse reqLogin(const std::string& username, const std::string& inputHashHex);
 
-    // 3. Upload File (Cần Token xác thực)
+    // Upload File (Cần Token xác thực)
     ServerResponse reqUpload(const std::string& token,
         const std::string& filename,
         const std::vector<unsigned char>& fileData,
         const std::string& ownerEncryptedKey);
 
-    // 4. Chia sẻ File (Cần Token xác thực)
+    // Chia sẻ File (Cần Token xác thực)
     ServerResponse reqShare(const std::string& token,
         const std::string& filename,
         const std::string& targetUser,
         int durationMinutes,
         const std::string& encryptedKeyForTarget);
 
-    // 5. Tải File (Cần Token xác thực + Kiểm tra hạn giờ)
-    ServerResponse reqDownload(const std::string& token, const std::string& filename);
+    // Hủy chia sẻ
+    ServerResponse reqRevokeShare(const std::string& token, const std::string& filename, const std::string& targetUser);
 
-    // 6. Lấy Public Key của user khác (Để Client thực hiện E2EE)
+    // Tải File (Cần Token xác thực + Kiểm tra hạn giờ)
+    ServerResponse reqDownload(const std::string& token, const std::string& filename);
+    ServerResponse reqDownloadViaLink(const std::string& token, const std::string& urlToken);
+
+    // Lấy Public Key của user khác (Để Client thực hiện E2EE)
     ServerResponse reqGetPublicKey(const std::string& token, const std::string& targetUser);
 
-    // 7. Request lấy Salt (Login Step 1)
+    // Request lấy Salt (Login Step 1)
     ServerResponse reqGetSalt(const std::string& username);
 
+    // Đăng xuất (Sẽ hủy session token)
     ServerResponse reqLogout(const std::string& token);
+
+    // Request danh sách file đã tải lên
+    ServerResponse reqListFiles(const std::string& token);
+
+    // Request xóa file
+    ServerResponse reqDeleteFile(const std::string& token, const std::string& filename);
 };

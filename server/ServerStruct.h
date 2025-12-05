@@ -18,7 +18,7 @@ struct ShareRecord {
 struct FileMetadata {
     std::string fileID;
     std::string owner;
-    std::string filePath;          // <--- Client KHÔNG ĐƯỢC BIẾT cái này
+    std::string filePath;
     std::string encryptedKeyOwner; // Key của chủ sở hữu
 
     // Map quản lý danh sách share

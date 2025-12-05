@@ -36,23 +36,34 @@ public:
 
     // --- CÁC TÍNH NĂNG NGƯỜI DÙNG ---
 
-    // 1. Đăng ký: Sinh cặp Key DH -> Gửi Public Key lên Server -> Lưu Private Key xuống đĩa
+    // Đăng ký: Sinh cặp Key DH -> Gửi Public Key lên Server -> Lưu Private Key xuống đĩa
     void actionRegister();
 
-    // 2. Đăng nhập: Hash pass -> Gửi lên Server -> Nhận Token -> Load Private Key
+    // Đăng nhập: Hash pass -> Gửi lên Server -> Nhận Token -> Load Private Key
     void actionLogin();
 
-    // 3. Upload: Sinh AES Key -> Encrypt File -> Encrypt Key (bằng PassHash) -> Gửi
+    // Upload: Sinh AES Key -> Encrypt File -> Encrypt Key (bằng PassHash) -> Gửi
     void actionUpload();
 
-    // 4. Share: Lấy PubKey Bob -> Tính Secret -> Encrypt Key (bằng Secret) -> Gửi
+    // Share: Lấy PubKey Bob -> Tính Secret -> Encrypt Key (bằng Secret) -> Gửi
     void actionShare();
 
-    // 5. Download: Tải về -> Decrypt Key (bằng PassHash hoặc Secret) -> Decrypt File
+    // Hủy share
+    void actionRevokeShare();
+
+    // Download: Tải về -> Decrypt Key (bằng PassHash hoặc Secret) -> Decrypt File
     void actionDownload();
 
-    // 6. Đăng xuất
+    void actionDownloadViaLink();
+
+    // Đăng xuất
     void actionLogout();
+
+    // Liệt kê danh sách files upload
+    void actionListFiles();
+
+    // Xóa file
+    void actionDeleteFile();
 
     bool isLoggedIn() const { return !sessionToken.empty(); }
 };

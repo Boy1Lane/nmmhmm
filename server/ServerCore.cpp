@@ -1,16 +1,15 @@
 ﻿#include "ServerCore.h"
 #include "../common/CryptoUtils.h"
 #include <iostream>
+#include "../common/json.hpp"
+
+using json = nlohmann::json;
 
 ServerCore::ServerCore(const std::string& storageDir,
     const std::string& userPath,
-    const std::string& metaPath)
-    : userManager(userPath),              // Truyền đường dẫn vào UserManager
-    fileManager(storageDir, metaPath)   // Truyền đường dẫn vào FileManager
-{
-}
+    const std::string& metaPath) : userManager(userPath), fileManager(storageDir, metaPath) {}
 
-// --- 1. XỬ LÝ ĐĂNG KÝ ---
+// Xử lý đăng ký
 ServerResponse ServerCore::reqRegister(const std::string& username,
     const std::string& passHashHex,
     const std::string& saltHex,
@@ -27,7 +26,7 @@ ServerResponse ServerCore::reqRegister(const std::string& username,
     return { AppError::ERR_USER_EXIST, "Tai khoan da ton tai!", "" };
 }
 
-// --- 2. XỬ LÝ ĐĂNG NHẬP ---
+// Xử lý đăng nhập
 ServerResponse ServerCore::reqLogin(const std::string& username, const std::string& inputHashHex) {
     std::vector<unsigned char> inputHash = CryptoUtils::HexToBytes(inputHashHex);
 
@@ -38,53 +37,64 @@ ServerResponse ServerCore::reqLogin(const std::string& username, const std::stri
     return { AppError::ERR_AUTH_FAIL, "Sai tai khoan hoac mat khau", "" };
 }
 
-// --- 3. XỬ LÝ UPLOAD ---
+// Xử lý update
 ServerResponse ServerCore::reqUpload(const std::string& token,
     const std::string& filename,
     const std::vector<unsigned char>& fileData,
     const std::string& ownerEncryptedKey)
 {
-    // B1: Xác thực Token -> Lấy username
+    // Xác thực Token -> Lấy username
     std::string owner = userManager.validateToken(token);
     if (owner.empty()) return { AppError::ERR_ACCESS_DENIED, "Token khong hop le", "" };
 
-    // B2: Lưu file
+    // Lưu file
     fileManager.saveFile(filename, fileData, owner, ownerEncryptedKey);
     return { AppError::SUCCESS, "Upload thanh cong", "" };
 }
 
-// --- 4. XỬ LÝ SHARE ---
-ServerResponse ServerCore::reqShare(const std::string& token,
-    const std::string& filename,
-    const std::string& targetUser,
-    int durationMinutes,
-    const std::string& encryptedKeyForTarget)
-{
-    // B1: Xác thực người gửi (sender)
-    std::string sender = userManager.validateToken(token);
+// Xử lý share
+ServerResponse ServerCore::reqShare(const std::string& token, const std::string& filename, const std::string& targetUser, int durationMinutes, const std::string& encryptedKeyForTarget) {
+    string sender = userManager.validateToken(token);
     if (sender.empty()) return { AppError::ERR_ACCESS_DENIED, "Token khong hop le", "" };
 
-    // B2: Gọi FileManager với thông tin sender
     int durationSeconds = durationMinutes * 60;
 
-    // Truyền thêm 'sender' vào để FileManager kiểm tra quyền chủ sở hữu
-    if (fileManager.shareFile(filename, sender, targetUser, durationSeconds, encryptedKeyForTarget)) {
-        return { AppError::SUCCESS, "Da chia se cho " + targetUser, "" };
+    // Gọi FileManager lấy Token
+    string shareToken = fileManager.shareFile(filename, sender, targetUser, durationSeconds, encryptedKeyForTarget);
+
+    if (!shareToken.empty()) {
+        // Tạo URL
+        string url = "securenote://download/" + shareToken;
+        return { AppError::SUCCESS, "Link chia se: " + url, "" };
     }
 
-    return { AppError::ERR_ACCESS_DENIED, "Loi chia se (File khong ton tai hoac ban khong phai chu so huu)", "" };
+    return { AppError::ERR_ACCESS_DENIED, "Loi chia se", "" };
 }
 
-// --- 5. XỬ LÝ DOWNLOAD ---
+// XỬ lý hủy share
+ServerResponse ServerCore::reqRevokeShare(const std::string& token, const std::string& filename, const std::string& targetUser) {
+    // Xác thực chủ sở hữu (người hủy)
+    std::string owner = userManager.validateToken(token);
+    if (owner.empty()) return { AppError::ERR_ACCESS_DENIED, "Token khong hop le", "" };
+
+    // Gọi FileManager
+    if (fileManager.revokeShare(filename, owner, targetUser)) {
+        return { AppError::SUCCESS, "Da huy quyen truy cap cua " + targetUser, "" };
+    }
+
+    return { AppError::ERR_FILE_NOT_FOUND, "Loi: File khong ton tai, ban khong phai chu so huu, hoac chua tung share cho nguoi nay.", "" };
+}
+
+// Xử lý download
 ServerResponse ServerCore::reqDownload(const std::string& token, const std::string& filename) {
-    // B1: Xác thực người yêu cầu
+    // Xác thực người yêu cầu
     std::string requester = userManager.validateToken(token);
     if (requester.empty()) return { AppError::ERR_ACCESS_DENIED, "Token khong hop le", "" };
 
     AppError err;
     std::string keyOut;
 
-    // B2: Lấy nội dung file và key (FileManager sẽ tự check hạn giờ)
+    // Lấy nội dung file và key
     std::vector<unsigned char> data = fileManager.getFile(filename, requester, err, keyOut);
 
     if (err != AppError::SUCCESS) {
@@ -93,27 +103,48 @@ ServerResponse ServerCore::reqDownload(const std::string& token, const std::stri
         return { err, "Khong tim thay file", "" };
     }
 
-    // B3: Đóng gói dữ liệu trả về
-    // Format payload giả định: KEY_HEX|DATA_HEX (Hoặc JSON nếu muốn xịn hơn)
-    // Ở đây mình trả về chuỗi Hex để demo
+    // Đóng gói dữ liệu trả về
+    // Format payload: KEY_HEX|DATA_HEX
     std::string payload = keyOut + "|" + CryptoUtils::BytesToHex(data);
 
     return { AppError::SUCCESS, "Download OK", payload };
 }
 
-// --- 6. LẤY PUBLIC KEY (Cho luồng Share) ---
+ServerResponse ServerCore::reqDownloadViaLink(const std::string& token, const std::string& urlToken) {
+    string requester = userManager.validateToken(token);
+    if (requester.empty()) return { AppError::ERR_ACCESS_DENIED, "Token khong hop le", "" };
+
+    AppError err;
+    string keyOut, filenameOut;
+
+    // Gọi hàm mới bên FileManager
+    vector<unsigned char> data = fileManager.getFileByLink(urlToken, requester, err, keyOut, filenameOut);
+
+    if (err != AppError::SUCCESS) {
+        if (err == AppError::ERR_LINK_EXPIRED) return { err, "Link da het han!", "" };
+        if (err == AppError::ERR_ACCESS_DENIED) return { err, "Link nay khong danh cho ban!", "" };
+        return { err, "Link khong ton tai", "" };
+    }
+
+    // Payload: FILENAME|KEY|DATA (Thêm filename vào đầu để Client biết tên file mà lưu)
+    string payload = filenameOut + "|" + keyOut + "|" + CryptoUtils::BytesToHex(data);
+
+    return { AppError::SUCCESS, "Download Link OK", payload };
+}
+
+// Lấy public key DH (để share)
 ServerResponse ServerCore::reqGetPublicKey(const std::string& token, const std::string& targetUser) {
-    // B1: Xác thực người hỏi
+    // Xác thực người hỏi
     if (userManager.validateToken(token).empty())
         return { AppError::ERR_ACCESS_DENIED, "Token khong hop le", "" };
 
-    // B2: Lấy key
+    // Lấy key
     std::vector<unsigned char> pubKey = userManager.getPublicKey(targetUser);
     if (pubKey.empty()) {
         return { AppError::ERR_FILE_NOT_FOUND, "User khong ton tai", "" };
     }
 
-    // B3: Trả về key dạng Hex để Client convert lại
+    // Trả về key dạng Hex để Client convert lại
     return { AppError::SUCCESS, "OK", CryptoUtils::BytesToHex(pubKey) };
 }
 
@@ -128,4 +159,34 @@ ServerResponse ServerCore::reqGetSalt(const std::string& username) {
 ServerResponse ServerCore::reqLogout(const std::string& token) {
     userManager.logout(token);
     return { AppError::SUCCESS, "Logged out", "" };
+}
+
+ServerResponse ServerCore::reqListFiles(const std::string& token) {
+    // Xác thực
+    std::string user = userManager.validateToken(token);
+    if (user.empty()) return { AppError::ERR_ACCESS_DENIED, "Token khong hop le", "" };
+
+    // Lấy danh sách file
+    std::vector<std::string> files = fileManager.listFiles(user);
+
+    // Đóng gói thành JSON string để gửi về
+    if (files.empty()) {
+        return { AppError::SUCCESS, "Ban chua upload file nao.", "[]" };
+    }
+
+    json j = files; // nlohmann::json tự động convert vector -> json array
+    return { AppError::SUCCESS, "Danh sach file cua ban", j.dump() };
+}
+
+ServerResponse ServerCore::reqDeleteFile(const std::string& token, const std::string& filename) {
+    // Xác thực user
+    std::string user = userManager.validateToken(token);
+    if (user.empty()) return { AppError::ERR_ACCESS_DENIED, "Token khong hop le", "" };
+
+    // Gọi FileManager xóa
+    if (fileManager.deleteFile(filename, user)) {
+        return { AppError::SUCCESS, "Da xoa file '" + filename + "' thanh cong.", "" };
+    }
+
+    return { AppError::ERR_ACCESS_DENIED, "Xoa that bai (File khong ton tai hoac ban khong phai chu so huu)", "" };
 }

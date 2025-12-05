@@ -67,8 +67,12 @@ int main() {
             cout << "Trang thai: DA DANG NHAP\n";
             cout << "3. Upload File (Secure)\n";
             cout << "4. Share File (E2EE)\n";
-            cout << "5. Download File\n";
-            cout << "6. Dang xuat\n";
+            cout << "5. Huy share File\n";
+            cout << "6. Download File\n";
+            cout << "7. Download file duoc chia se\n";
+            cout << "8. Liet ke danh sach file da tai len\n";
+            cout << "9. Xoa file\n";
+            cout << "10. Dang xuat\n";
         }
         else {
             cout << "Trang thai: CHUA DANG NHAP\n";
@@ -96,9 +100,21 @@ int main() {
                 app.actionShare();
                 break;
             case 5:
-                app.actionDownload();
+                app.actionRevokeShare();
                 break;
             case 6:
+                app.actionDownload();
+                break;
+            case 7:
+                app.actionDownloadViaLink();
+                break;
+            case 8:
+                app.actionListFiles();
+                break;
+            case 9:
+                app.actionDeleteFile();
+                break;
+            case 10:
                 app.actionLogout();
                 break;
             default:
