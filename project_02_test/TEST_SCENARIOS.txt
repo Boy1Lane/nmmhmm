@@ -1,0 +1,140 @@
+================================================================================
+                        KỊCH BẢN KIỂM THỬ (TEST SCENARIOS)
+                    DỰ ÁN: SECURE FILE SHARING APPLICATION
+================================================================================
+
+THÔNG TIN CHUNG:
+- Nhóm thực hiện: Team 1
+- Môi trường kiểm thử: Windows 10/11, Visual Studio 2022
+- Server Address: 127.0.0.1 (Localhost)
+- Port: 8080
+
+CẤU TRÚC THƯ MỤC MINH CHỨNG:
+- project_02_test/inputs/    : Chứa file gốc dùng để test.
+- project_02_test/evidence/  : Chứa ảnh chụp màn hình kết quả.
+
+================================================================================
+PHẦN 1: KIỂM TRA XÁC THỰC NGƯỜI DÙNG (AUTHENTICATION)
+--------------------------------------------------------------------------------
+
+[TEST CASE 1.1] Đăng ký tài khoản trùng lặp
+- Mô tả: Người dùng cố gắng đăng ký một username đã tồn tại.
+- Các bước:
+  1. Chạy Client 1, đăng ký user: "alice".
+  2. Chạy Client 2, cố gắng đăng ký lại user: "alice".
+- Mong đợi: Hệ thống báo lỗi "[ERROR] Ten dang nhap da bi trung".
+- Kết quả: PASS
+- Minh chứng: evidence/1a_register_fail.png
+
+[TEST CASE 1.2] Đăng nhập sai thông tin
+- Mô tả: Kiểm tra cơ chế bảo vệ mật khẩu.
+- Các bước:
+  1. Chọn "2. Dang nhap".
+  2. Nhập user: "alice", pass: "wrongpass".
+- Mong đợi: Hệ thống báo lỗi "[ERROR] Sai tai khoan hoac mat khau".
+- Kết quả: PASS
+- Minh chứng: evidence/1b_login_fail.png
+
+================================================================================
+PHẦN 2: KIỂM TRA MÃ HÓA & TOÀN VẸN DỮ LIỆU (ENCRYPTION & INTEGRITY)
+Mục tiêu: Đảm bảo dữ liệu được mã hóa ở Client và giải mã đúng khi tải về
+--------------------------------------------------------------------------------
+
+[TEST CASE 2.1] Kiểm tra tính bí mật tại Server (Zero-Knowledge)
+- Mô tả: Đảm bảo Server chỉ lưu file rác (encrypted).
+- Các bước:
+  1. Alice upload file "inputs/test_text.txt" (Nội dung: "CONFIDENTIAL DATA").
+  2. Mở thư mục "server/data/storage/".
+  3. Mở file vừa upload bằng Notepad.
+- Mong đợi: Nội dung không đọc được, hiển thị ký tự lạ.
+- Kết quả: PASS
+- Minh chứng: evidence/2.1_server_encrypted.png
+
+[TEST CASE 2.2] Kiểm tra tính toàn vẹn khi tải về
+- Mô tả: Đảm bảo file sau khi giải mã giống hệt file gốc (Binary safe).
+- Các bước:
+  1. Alice upload file ảnh "inputs/test_image.png".
+  2. Alice chọn "6. Download File" để tải về lại.
+  3. Mở file ảnh tải về.
+- Mong đợi: Ảnh hiển thị bình thường, không bị lỗi màu hay vỡ hình.
+- Kết quả: PASS
+- Minh chứng: evidence/2.2.1_intergrity_decrypted.jpg, 2.2.2_intergrity_decrypted.jpg, 2.2.3_intergrity_decrypted.jpg
+
+================================================================================
+PHẦN 3: KIỂM TRA QUY TRÌNH CHIA SẺ E2EE QUA URL (CHÍNH)
+Mục tiêu: Chứng minh luồng chia sẻ bảo mật thông qua liên kết định danh.
+--------------------------------------------------------------------------------
+
+[TEST CASE 3.1] Chia sẻ và Tải file thành công (Happy Flow)
+- Mô tả: Alice chia sẻ file ảnh cho Bob, Bob dùng Link để tải và giải mã.
+- Các bước:
+  1. Alice upload file "inputs/test_image.png".
+  2. Alice chọn "4. Share File (E2EE)", nhập người nhận "bob", thời gian "5".
+  3. Hệ thống trả về Link (VD: securenote://download/...). Copy link này.
+  4. Bob đăng nhập ở cửa sổ khác.
+  5. Bob chọn "7. Download file duoc chia se".
+  6. Dán Link vừa copy vào.
+  7. Khi hệ thống yêu cầu "Nhap Username nguoi gui", nhập: "alice".
+- Mong đợi: 
+  + Client Bob thông báo "[SUCCESS] File da tai xuong tai: ../download/bob/test_image.png".
+  + Mở file ảnh lên xem được bình thường (Giải mã Binary đúng).
+- Kết quả thực tế: PASS
+- Minh chứng: evidence/3.1.1_url_e2ee_success.png, 3.1.2_url_e2ee_success.png, 3.1.3_url_e2ee_success.png
+
+[TEST CASE 3.2] Truy cập trái phép (Sai người nhận)
+- Mô tả: Người dùng Candy có được Link nhưng không phải người được share.
+- Các bước:
+  1. Đăng nhập user "candy".
+  2. Chọn "7. Download file duoc chia se", dán đúng Link của Alice.
+- Mong đợi: Server từ chối truy cập (Access Denied) vì Token trong Link không khớp với user Candy, hoặc giải mã thất bại.
+- Kết quả thực tế: PASS
+- Minh chứng: evidence/3.2.1_unauthorized_access.png, 3.2.2_unauthorized_access.png
+
+[TEST CASE 3.3] Sai thông tin người gửi (Lỗi giải mã)
+- Mô tả: Bob có link nhưng nhập sai tên người gửi (dẫn đến lấy sai Public Key).
+- Các bước:
+  1. Bob chọn "7. Download file duoc chia se", dán Link đúng.
+  2. Nhập người gửi là "charlie" (hoặc tên bất kỳ khác "alice").
+- Mong đợi: Hệ thống báo lỗi giải mã Key (do Shared Secret tính ra bị sai).
+- Kết quả thực tế: PASS
+- Minh chứng: evidence/3.3.1_wrong_sender_key.png, 3.3.1_wrong_sender_key.png
+
+================================================================================
+PHẦN 4: KIỂM TRA GIỚI HẠN THỜI GIAN (TIME-SENSITIVE)
+Mục tiêu: Đảm bảo URL hết hiệu lực sau thời gian quy định.
+--------------------------------------------------------------------------------
+
+[TEST CASE 4.1] Truy cập khi liên kết hết hạn
+- Mô tả: Alice share file cho Bob với thời hạn 1 phút.
+- Các bước:
+  1. Alice thực hiện Share cho Bob, đặt thời gian là 1 phút.
+  2. Copy Link chia sẻ.
+  3. Chờ đợi 2 phút trôi qua.
+  4. Bob đăng nhập, chọn "7. Download file duoc chia se" và dùng Link trên.
+- Mong đợi: Server báo lỗi "[ERROR] Lien ket da het han" (Link expired) ngay khi gửi Link.
+- Kết quả thực tế: PASS
+- Minh chứng: evidence/4_link_expired.png
+
+================================================================================
+PHẦN 5: KIỂM TRA QUẢN LÝ DỮ LIỆU (DATA MANAGEMENT)
+Mục tiêu: Đảm bảo người dùng có toàn quyền kiểm soát dữ liệu của mình.
+--------------------------------------------------------------------------------
+
+[TEST CASE 5.1] Liệt kê và Xóa file
+- Mô tả: Kiểm tra chức năng xem danh sách và xóa file khỏi hệ thống.
+- Các bước:
+  1. Alice chọn "8. Liet ke danh sach". -> Mong đợi: Hiện danh sách file đã up.
+  2. Alice chọn "9. Xoa file", nhập tên file cần xóa.
+  3. Alice chọn lại "8. Liet ke".
+- Mong đợi: File đã xóa không còn xuất hiện trong danh sách.
+- Kết quả: PASS
+- Minh chứng: evidence/5.1.1_list_delete_file_success.png, 5.1.2_list_delete_file_success.png
+
+[TEST CASE 5.2] Hủy quyền chia sẻ (Revoke)
+- Mô tả: Alice muốn thu hồi quyền truy cập của Bob trước thời hạn.
+- Các bước:
+  1. Alice chọn "5. Huy share File", nhập tên file và user "bob".
+  2. Bob dùng Link cũ để tải lại file đó.
+- Mong đợi: Alice nhận thông báo thành công. Bob nhận thông báo lỗi "Access Denied" hoặc "Key not found".
+- Kết quả: PASS
+- Minh chứng: evidence/5.2.1_revoke_success.png, 5.2.2_revoke_success.png
